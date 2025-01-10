@@ -1,33 +1,32 @@
 #include "esp_camera.h"
 #include <WiFi.h>
-#include <HTTPClient.h>
-#include <Base64.h>
+#include <Arduino.h>
 
-// Replace with your Wi-Fi credentials
+// Gantilah dengan kredensial Wi-Fi Anda
 const char* ssid = "your_SSID";
 const char* password = "your_PASSWORD";
 
-// Camera pin configuration for ESP32-CAM
-#define CAMERA_MODEL_AI_THINKER // For AI Thinker ESP32-CAM
+// Konfigurasi pin kamera untuk ESP32-CAM
+#define CAMERA_MODEL_AI_THINKER // Untuk model AI Thinker ESP32-CAM
 #include "camera_pins.h"
 
-// Replace with your server URL (Python Flask server or other OCR API)
-const char* serverUrl = "http://yourserver.com/ocr";
-
-WiFiClient client;
+// Fungsi untuk memulai server kamera (opsional)
+void startCameraServer() {
+  // Misalnya untuk streaming gambar via antarmuka web
+}
 
 void setup() {
   Serial.begin(115200);
 
-  // Connect to Wi-Fi
+  // Menghubungkan ke Wi-Fi
   WiFi.begin(ssid, password);
   while (WiFi.status() != WL_CONNECTED) {
     delay(1000);
-    Serial.println("Connecting to WiFi...");
+    Serial.println("Menghubungkan ke WiFi...");
   }
-  Serial.println("Connected to WiFi!");
+  Serial.println("Terhubung ke WiFi!");
 
-  // Initialize the camera
+  // Menginisialisasi kamera
   camera_config_t config;
   config.ledc_channel = LEDC_CHANNEL;
   config.ledc_timer = LEDC_TIMER;
@@ -47,54 +46,73 @@ void setup() {
   config.pin_sscb_scl = 13;
   config.pin_reset = -1;
   config.xclk_freq_hz = 20000000;
-  config.pixel_format = PIXFORMAT_JPEG;
-  config.frame_size = FRAMESIZE_VGA;
-  config.jpeg_quality = 12;
+  config.pixel_format = PIXFORMAT_GRAYSCALE;  // Menggunakan format grayscale untuk deteksi angka
+  config.frame_size = FRAMESIZE_QVGA;  // Resolusi rendah untuk efisiensi
   config.fb_count = 2;
 
-  // Initialize camera
+  // Menginisialisasi kamera
   esp_camera_init(&config);
 
-  Serial.println("Camera initialized!");
+  Serial.println("Kamera diinisialisasi!");
 }
 
 void loop() {
-  // Capture image
+  // Menangkap gambar
   camera_fb_t *fb = esp_camera_fb_get();
   if (!fb) {
-    Serial.println("Camera capture failed");
+    Serial.println("Gagal menangkap gambar");
     return;
   }
 
-  // Send the image for OCR processing
-  sendImageForOCR(fb->buf, fb->len);
+  // Proses gambar untuk deteksi angka
+  processImage(fb->buf, fb->len);
 
-  // Free the frame buffer
+  // Membebaskan buffer frame
   esp_camera_fb_return(fb);
 
-  delay(5000); // Capture every 5 seconds (adjust as needed)
+  delay(5000); // Menangkap gambar setiap 5 detik (sesuaikan sesuai kebutuhan)
 }
 
-void sendImageForOCR(uint8_t* imageBuffer, size_t imageLength) {
-  HTTPClient http;
-  http.begin(serverUrl);
-  http.addHeader("Content-Type", "application/json");
+void processImage(uint8_t* imageBuffer, size_t imageLength) {
+  Serial.println("Memproses gambar...");
 
-  // Convert image to Base64
-  String imageBase64 = base64::encode(imageBuffer, imageLength);
-
-  // Prepare JSON body with the image data
-  String body = "{\"image\": \"" + imageBase64 + "\"}";
-
-  // Send POST request to the server
-  int httpResponseCode = http.POST(body);
-
-  if (httpResponseCode > 0) {
-    String response = http.getString();
-    Serial.println("OCR Response: " + response);
-  } else {
-    Serial.println("Error on HTTP request");
+  // Langkah 1: Mengubah gambar menjadi grayscale sudah dilakukan karena kamera diatur untuk grayscale
+  // Langkah 2: Terapkan thresholding sederhana (untuk membedakan angka dari latar belakang)
+  uint8_t threshold = 128;  // Nilai threshold untuk konversi
+  for (size_t i = 0; i < imageLength; i++) {
+    if (imageBuffer[i] < threshold) {
+      imageBuffer[i] = 0;  // Pixel gelap menjadi hitam
+    } else {
+      imageBuffer[i] = 255;  // Pixel terang menjadi putih
+    }
   }
 
-  http.end();
+  // Langkah 3: Deteksi kontur untuk menemukan angka
+  // (Pendekatan ini hanya memberikan gambaran sederhana karena ESP32 terbatas dalam pengolahan citra yang kompleks)
+  int detectedNumbers = detectNumbers(imageBuffer, imageLength);
+
+  // Tampilkan angka yang terdeteksi
+  if (detectedNumbers > 0) {
+    Serial.print("Angka yang terdeteksi: ");
+    Serial.println(detectedNumbers);
+  } else {
+    Serial.println("Tidak ada angka yang terdeteksi.");
+  }
+}
+
+int detectNumbers(uint8_t* imageBuffer, size_t imageLength) {
+  // Fungsi deteksi angka sederhana (contoh: pencocokan pola atau analisis kontur)
+  // Di sini kita hanya akan menghitung jumlah pixel putih sebagai deteksi kasar angka
+  int count = 0;
+  for (size_t i = 0; i < imageLength; i++) {
+    if (imageBuffer[i] == 255) {  // Pixel putih
+      count++;
+    }
+  }
+  
+  // Berdasarkan jumlah pixel putih, kita bisa mencoba mendeteksi angka
+  // Misalnya, kita bisa menyesuaikan nilai deteksi angka berdasarkan ukuran atau pola tertentu
+  // Ini adalah cara yang sangat sederhana dan bukan OCR yang sesungguhnya.
+  
+  return (count > 500) ? 1 : 0;  // Deteksi angka jika lebih dari 500 pixel putih
 }
